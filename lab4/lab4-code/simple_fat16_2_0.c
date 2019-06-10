@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <ctype.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -45,31 +44,33 @@ char** path_split(char* pathInput, int* pathDepth_ret)
                 continue;
             else
             {
-                while (j < 11)
+                while (j < 11) //用空格把剩下的填充满
                     paths[pathDepth - 1][j++] = ' ';
-                pathDepth += 1;
+                pathDepth++;
                 paths                = realloc(paths, pathDepth * sizeof(char*));
                 paths[pathDepth - 1] = malloc(11 * sizeof(char));
                 j                    = 0;
             }
         }
+        else if (pathInput[i] == '.')
+        {
+            while (j < 8)
+                paths[pathDepth - 1][j++] = ' ';
+        }
         else
         {
-            if (pathInput[i] == '.')
-            {
-                while (j < 8)
-                    paths[pathDepth - 1][j++] = ' ';
-            }
+            if (j == 11)
+                continue;
             else
             {
-                if (j == 11)
-                    continue;
+                if (pathInput[i] >= 97 && pathInput[i] <= 122) //小写字母转换为大写字母
+                    paths[pathDepth - 1][j++] = pathInput[i] - 32;
                 else
-                    paths[pathDepth - 1][j++] = toupper(pathInput[i]);
+                    paths[pathDepth - 1][j++] = pathInput[i];
             }
         }
     }
-    while (j < 11)
+    while (j < 11) //用空格把剩下的填充满
         paths[pathDepth - 1][j++] = ' ';
 
     *pathDepth_ret = pathDepth;
@@ -85,16 +86,17 @@ BYTE* path_decode(BYTE* path)
 {
     BYTE* pathDecoded = malloc(MAX_SHORT_NAME_LEN * sizeof(BYTE));
     int   i, j;
-    int   fileName_Extension = 0;
-    BYTE  CURRENT_DIR[12]    = ".          ";
-    BYTE  PARENT_DIR[12]     = "..         ";
+    int   doteAdded      = 0;
+    BYTE  CUR_DIR[12]    = ".          ";
+    BYTE  PARENT_DIR[12] = "..         ";
 
-    if (strncmp("   ", path + 8, 3) == 0)
+    if (strncmp("   ", path + 8, 3) == 0) //后面三个字符都是空格
     {
-        fileName_Extension = 1; // no extension
+        doteAdded = 1; //加过点，相当于不要加点
     }
 
-    if (strcmp(path, CURRENT_DIR) == 0)
+    //两个特殊的文件名特殊处理
+    if (strcmp(path, CUR_DIR) == 0)
     {
         pathDecoded[0] = '.';
         pathDecoded[1] = '\0';
@@ -111,34 +113,32 @@ BYTE* path_decode(BYTE* path)
     {
         for (i = 0, j = 0; i < 11; i++)
         {
-            if (path[i] == '\0')
+            if (path[i] == 0x00)
             {
                 return "";
             }
-            else if (path[i] == ' ')
+            else if (path[i] == ' ' && doteAdded == 0)
             {
-                if (fileName_Extension == 0)
-                {
-                    pathDecoded[j++]   = '.';
-                    fileName_Extension = 1;
-                    i                  = 7;
-                }
-                else
-                    continue;
+                pathDecoded[j++] = '.';
+                doteAdded        = 1;
+                i                = 7;
             }
+            else if (path[i] == ' ' && i >= 0)
+            {
+                continue;
+            }
+            else if (i == 8 && doteAdded == 0)
+            {
+                pathDecoded[j++] = '.';
+                doteAdded        = 1;
+                i--;
+            }
+            else if (path[i] >= 65 && path[i] <= 90)
+                pathDecoded[j++] = path[i] + 32;
             else
-            {
-                if (i == 8 && fileName_Extension == 0)
-                {
-                    pathDecoded[j++]   = '.';
-                    fileName_Extension = 1;
-                    i--;
-                }
-                else
-                    pathDecoded[j++] = tolower(path[i]);
-            }
+                pathDecoded[j++] = path[i];
         }
-        pathDecoded[j] = '\0';
+        pathDecoded[j] = '\0'; //字符串结尾符加上
     }
 
     return pathDecoded;
@@ -166,9 +166,9 @@ FAT16* pre_init_fat16(void)
     sector_read(fd, 0, DBR_buffer); //读取DBR扇区的数据
 
     /** TODO: 
-     * 初始化fat16_ins的其余成员变量
-     * Hint: root directory的大小与Bpb.BPB_RootEntCnt有关，并且是扇区对齐的
-    **/
+   * 初始化fat16_ins的其余成员变量
+   * Hint: root directory的大小与Bpb.BPB_RootEntCnt有关，并且是扇区对齐的
+  **/
 
     //通过读取DBR扇区赋值
     memcpy(fat16_ins->Bpb.BS_jmpBoot, DBR_buffer, 3);
@@ -193,8 +193,9 @@ FAT16* pre_init_fat16(void)
     memcpy(fat16_ins->Bpb.BS_FilSysType, DBR_buffer + 0x36, 8);
     memcpy(fat16_ins->Bpb.Reserved2, DBR_buffer + 0x3e, 448);
     memcpy(&fat16_ins->Bpb.Signature_word, DBR_buffer + 0x01fe, 2);
-    fat16_ins->FirstRootDirSecNum = fat16_ins->Bpb.BPB_RsvdSecCnt + fat16_ins->Bpb.BPB_NumFATS * fat16_ins->Bpb.BPB_FATSz16;
-    fat16_ins->FirstDataSector    = fat16_ins->FirstRootDirSecNum + 32;
+    fat16_ins->FirstRootDirSecNum = fat16_ins->Bpb.BPB_RsvdSecCnt +
+                                    fat16_ins->Bpb.BPB_NumFATS * fat16_ins->Bpb.BPB_FATSz16;
+    fat16_ins->FirstDataSector = fat16_ins->FirstRootDirSecNum + 32;
 
     return fat16_ins;
 }
@@ -210,6 +211,7 @@ WORD fat_entry_by_cluster(FAT16* fat16_ins, WORD ClusterN)
     WORD FAT_Entry;
 
     sector_read(fat16_ins->fd, FAT_sector_num, FAT_sector_buffer);
+    // a bug that costs two days: '%' is forgeten !!!
     FAT_Entry = FAT_sector_buffer[FAT_ClusterN % BYTES_PER_SECTOR] + FAT_sector_buffer[(FAT_ClusterN + 1) % BYTES_PER_SECTOR] * 0x0100;
 
     return FAT_Entry;
@@ -240,7 +242,7 @@ int find_root(FAT16* fat16_ins, DIR_ENTRY* Dir, const char* path)
     /* 先读取root directory */
     int i;
     int RootDirCnt = 1; /* 用于统计已读取的扇区数 */
-    // 一个扇区容纳16个32 bytes的目录项
+    //一个扇区容纳16个32 bytes的目录项
     BYTE buffer[BYTES_PER_SECTOR];
 
     sector_read(fat16_ins->fd, fat16_ins->FirstRootDirSecNum, buffer);
@@ -423,9 +425,9 @@ int fat16_readdir(const char* path, void* buffer, fuse_fill_dir_t filler, off_t 
         DIR_ENTRY Root;
 
         /** TODO:
-        * 将root directory下的文件或目录通过filler填充到buffer中
-        * 注意不需要遍历子目录
-        **/
+     * 将root directory下的文件或目录通过filler填充到buffer中
+     * 注意不需要遍历子目录
+    **/
         sector_read(fat16_ins->fd, fat16_ins->FirstRootDirSecNum, sector_buffer);
 
         filler(buffer, ".", NULL, 0);
@@ -451,11 +453,11 @@ int fat16_readdir(const char* path, void* buffer, fuse_fill_dir_t filler, off_t 
         DIR_ENTRY Dir;
 
         /** TODO:
-         * 通过find_root获取path对应的目录的目录项，
-         * 然后访问该目录，将其下的文件或目录通过filler填充到buffer中，
-         * 同样注意不需要遍历子目录
-         * Hint: 需要考虑目录大小，可能跨扇区，跨簇
-        **/
+     * 通过find_root获取path对应的目录的目录项，
+     * 然后访问该目录，将其下的文件或目录通过filler填充到buffer中，
+     * 同样注意不需要遍历子目录
+     * Hint: 需要考虑目录大小，可能跨扇区，跨簇
+    **/
         find_root(fat16_ins, &Dir, path);
 
         WORD ClusterN, FatClusEntryVal, FirstSectorofCluster;
@@ -510,7 +512,7 @@ int fat16_read(const char* path, char* buffer, size_t size, off_t offset, struct
 
     find_root(fat16_ins, &Dir, path);
 
-    if (offset >= Dir.DIR_FileSize) // offset超过文件大小
+    if (offset >= Dir.DIR_FileSize) //offset超过文件大小
         return 0;
 
     int  offset_in_sector = offset % BYTES_PER_SECTOR;
@@ -520,22 +522,22 @@ int fat16_read(const char* path, char* buffer, size_t size, off_t offset, struct
     int  i;
     ClusterN = Dir.DIR_FstClusLO;
 
-    // 找到offset偏移处的扇区
+    //找到offset偏移处的扇区
     first_sector_by_cluster(fat16_ins, ClusterN, &FatClusEntryVal, &FirstSectorofCluster, sector_buffer);
     for (i = 1; i <= OffSectorNum; i++)
     {
-        // 换簇
+        //换簇
         if (i % fat16_ins->Bpb.BPB_SecPerClus == 0)
         {
             first_sector_by_cluster(fat16_ins, FatClusEntryVal, &FatClusEntryVal, &FirstSectorofCluster, sector_buffer);
         }
-        else // 换扇区
+        else //换扇区
         {
             sector_read(fat16_ins->fd, FirstSectorofCluster + i % 4, sector_buffer);
         }
     }
 
-    // 将大小为size的文件内容读进buffer（不能超过文件长度）
+    //将大小为size的文件内容读进buffer（不能超过文件长度）
     if (offset + size > Dir.DIR_FileSize)
         size = Dir.DIR_FileSize - offset;
 
@@ -543,38 +545,38 @@ int fat16_read(const char* path, char* buffer, size_t size, off_t offset, struct
     int  ReadSectorNum = size / BYTES_PER_SECTOR;
     int  RemainSize    = size % BYTES_PER_SECTOR;
 
-    // 接着上面的，一边读取数据，一边顺着数据更新扇区和簇（如果数据很大的话都要更新）
+    //接着上面的，一边读取数据，一边顺着数据更新扇区和簇（如果数据很大的话都要更新）
     if (OffRemainSize > 0)
     {
         memcpy(buffer, sector_buffer + offset_in_sector, OffRemainSize);
         OffSectorNum++;
     }
-    // fuse执行时 offset_in_sector == 0
+    //以下假设offset_in_sector == 0（事实上fuse执行的时候也保证了这一点）
     for (i = OffSectorNum; i < ReadSectorNum + OffSectorNum; i++)
     {
-        // 换簇
+        //换簇
         if (i % fat16_ins->Bpb.BPB_SecPerClus == 0 && i != OffSectorNum)
         {
             first_sector_by_cluster(fat16_ins, FatClusEntryVal, &FatClusEntryVal, &FirstSectorofCluster, sector_buffer);
         }
-        else // 换扇区
+        else //换扇区
         {
             sector_read(fat16_ins->fd, FirstSectorofCluster + i % 4, sector_buffer);
         }
 
-        // 给buffer赋值
+        //给buffer赋值
         memcpy(buffer + (i - OffSectorNum) * BYTES_PER_SECTOR + OffRemainSize, sector_buffer, BYTES_PER_SECTOR);
     }
 
-    // 处理最后一个RemainSize
+    //处理最后一个RemainSize
     if (RemainSize > 0)
     {
-        // 换簇
+        //换簇
         if (i % fat16_ins->Bpb.BPB_SecPerClus == 0 && i != OffSectorNum)
         {
             first_sector_by_cluster(fat16_ins, FatClusEntryVal, &FatClusEntryVal, &FirstSectorofCluster, sector_buffer);
         }
-        else // 换扇区
+        else //换扇区
         {
             sector_read(fat16_ins->fd, FirstSectorofCluster + i % 4, sector_buffer);
         }
